@@ -47,7 +47,7 @@ export default function TasksPage() {
     const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
     const [editTitle, setEditTitle] = useState("");
     const [editDescription, setEditDescription] = useState("");
-    const { user, loading: authLoading, refreshAuth } = useAuth();
+    const { user, loading: authLoading, setUser } = useAuth();
 
     const fetchTasks = async () => {
         setLoading(true);
@@ -107,7 +107,7 @@ export default function TasksPage() {
         try {
             // Call backend to clear auth cookie
             await api.post("/auth/logout", {}, { withCredentials: true });
-
+            setUser(null);
             toast.success("Logged out successfully");
 
             // Redirect to login
@@ -170,7 +170,7 @@ export default function TasksPage() {
 
         setActionLoading(id);
         try {
-            await api.put(`/task/${id}`, {
+            await api.patch(`/task/${id}`, {
                 title: editTitle.trim(),
                 description: editDescription.trim(),
             });
