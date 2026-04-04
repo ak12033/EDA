@@ -20,6 +20,12 @@ TaskPilot Pro allows users to:
 ### 🔐 Register Page
 ![Register](./screenshots/register.png)
 
+### 🔑 Authentication Flow
+![Authentication](./screenshots/authentication.png)
+
+### 👤 Already Logged In User
+![LoggedIn](./screenshots/session.png)
+
 ### 📊 Dashboard
 ![Dashboard](./screenshots/desktop.png)
 
