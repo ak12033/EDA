@@ -3,6 +3,59 @@ import { Request, Response } from "express";
 import prisma from "../lib/prisma.js";
 import { AuthRequest } from "../types/express.js";
 
+// GET /tasks/stats
+export const getTaskStats = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    // 🔥 Run queries in parallel (optimized)
+    const [totalTasks, completedTasks] = await Promise.all([
+      prisma.task.count({
+        where: { userId },
+      }),
+      prisma.task.count({
+        where: {
+          userId,
+          status: "completed",
+        },
+      }),
+    ]);
+
+    const pendingTasks = totalTasks - completedTasks;
+
+    const completionRate =
+      totalTasks > 0
+        ? Math.round((completedTasks / totalTasks) * 100)
+        : 0;
+
+    return res.status(200).json({
+      success: true,
+      message: "Task stats fetched successfully",
+      data: {
+        totalTasks,
+        completedTasks,
+        pendingTasks,
+        completionRate,
+      },
+    });
+
+  } catch (error) {
+    console.error("Get Task Stats Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
 // GET /tasks?status=&search=&page=&limit=
 export const getTasks = async (req: AuthRequest, res: Response) => {
   try {
@@ -16,7 +69,7 @@ export const getTasks = async (req: AuthRequest, res: Response) => {
     }
 
     const page = Number(req.query.page) || 1;
-    const limit = Number(req.query.limit) || 10;
+    const limit = Number(req.query.limit) || 5;
     const status = req.query.status as string | undefined;
     const search = req.query.search as string | undefined;
 
@@ -94,7 +147,7 @@ export const createTask = async (req: AuthRequest, res: Response) => {
         title: title.trim(),
         description: description?.trim() || null,
         userId,
-        status: "pending", 
+        status: "pending",
       },
     });
 
@@ -193,8 +246,8 @@ export const deleteTask = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const existingTask = await prisma.task.findFirst({where: { id: taskId, userId }});
-    if(!existingTask) {
+    const existingTask = await prisma.task.findFirst({ where: { id: taskId, userId } });
+    if (!existingTask) {
       return res.status(404).json({
         success: false,
         message: "Task not found",
@@ -237,7 +290,7 @@ export const toggleTask = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const existingTask = await prisma.task.findFirst({where: { id: taskId, userId }});
+    const existingTask = await prisma.task.findFirst({ where: { id: taskId, userId } });
     if (!existingTask) {
       return res.status(404).json({
         success: false,

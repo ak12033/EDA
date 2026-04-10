@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/utils/api";
 import { toast } from "react-toastify";
@@ -43,16 +43,35 @@ export default function TasksPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [filter, setFilter] = useState<"all" | "completed" | "pending">("all");
     const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [totalMatchingTasks, setTotalMatchingTasks] = useState(0);
+
+    const [stats, setStats] = useState({
+        totalTasks: 0,
+        completedTasks: 0,
+        pendingTasks: 0,
+        completionRate: 0,
+    });
 
     const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
     const [editTitle, setEditTitle] = useState("");
     const [editDescription, setEditDescription] = useState("");
     const { user, loading: authLoading, setUser } = useAuth();
 
-    const fetchTasks = async () => {
+    const fetchTasks = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await api.get("/task");
+            const params = new URLSearchParams();
+            params.append("page", currentPage.toString());
+            params.append("limit", TASKS_PER_PAGE.toString());
+            if (filter !== "all") {
+                params.append("status", filter);
+            }
+            if (searchTerm) {
+                params.append("search", searchTerm);
+            }
+
+            const res = await api.get(`/task?${params.toString()}`);
 
             const fetchedTasks = Array.isArray(res.data.data)
                 ? res.data.data.map((t: any) => ({
@@ -62,6 +81,11 @@ export default function TasksPage() {
                 : [];
 
             setTasks(fetchedTasks);
+
+            if (res.data.meta) {
+                setTotalPages(res.data.meta.totalPages || 1);
+                setTotalMatchingTasks(res.data.meta.total || 0);
+            }
         } catch (err) {
             console.error("Fetch tasks error:", err);
             toast.error("Failed to fetch tasks");
@@ -69,17 +93,37 @@ export default function TasksPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [currentPage, filter, searchTerm]);
+
+    const fetchStats = useCallback(async () => {
+        try {
+            const res = await api.get("/task/stats");
+            if (res.data && res.data.success) {
+                setStats(res.data.data);
+            }
+        } catch (err) {
+            console.error("Fetch stats error:", err);
+        }
+    }, []);
 
     useEffect(() => {
         if (!authLoading) {
             if (!user) {
                 router.push("/login");
             } else {
-                fetchTasks(); // only fetch tasks if user exists
+                fetchStats();
             }
         }
-    }, [authLoading, user, router]);
+    }, [authLoading, user, router, fetchStats]);
+
+    useEffect(() => {
+        if (!authLoading && user) {
+            const timer = setTimeout(() => {
+                fetchTasks();
+            }, 500); // Debounce fetchTasks
+            return () => clearTimeout(timer);
+        }
+    }, [fetchTasks, authLoading, user]);
 
     const handleAddTask = async () => {
         if (!title.trim()) return toast.error("Title is required");
@@ -93,8 +137,8 @@ export default function TasksPage() {
             toast.success("Task added!");
             setTitle("");
             setDescription("");
-            await fetchTasks();
-            setCurrentPage(1);
+            setCurrentPage(1); // This will trigger fetchTasks via debounced effect
+            await fetchStats();
         } catch (err) {
             toast.error("Failed to add task");
         } finally {
@@ -123,6 +167,7 @@ export default function TasksPage() {
         try {
             await api.patch(`/task/${id}/toggle`);
             toast.success("Task status updated!");
+            await fetchStats();
             await fetchTasks();
         } catch (err) {
             toast.error("Failed to toggle task");
@@ -136,13 +181,7 @@ export default function TasksPage() {
         try {
             await api.delete(`/task/${id}`);
             toast.success("Task deleted!");
-            const updatedTasks = tasks.filter((task) => task.id !== id);
-            const newTotalPages = Math.max(1, Math.ceil(updatedTasks.length / TASKS_PER_PAGE));
-
-            if (currentPage > newTotalPages) {
-                setCurrentPage(newTotalPages);
-            }
-
+            await fetchStats();
             await fetchTasks();
         } catch (err) {
             toast.error("Failed to delete task");
@@ -186,32 +225,7 @@ export default function TasksPage() {
         }
     };
 
-    const filteredTasks = useMemo(() => {
-        return tasks.filter((task) => {
-            const matchesSearch =
-                task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                (task.description || "")
-                    .toLowerCase()
-                    .includes(searchTerm.toLowerCase());
-
-            const matchesFilter =
-                filter === "all"
-                    ? true
-                    : filter === "completed"
-                        ? task.status
-                        : !task.status;
-
-            return matchesSearch && matchesFilter;
-        });
-    }, [tasks, searchTerm, filter]);
-
-    const totalTasks = tasks.length;
-    const completedTasks = tasks.filter((task) => task.status).length;
-    const pendingTasks = tasks.filter((task) => !task.status).length;
-    const completionRate =
-        totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-
-    const totalPages = Math.max(1, Math.ceil(filteredTasks.length / TASKS_PER_PAGE));
+    const { totalTasks, completedTasks, pendingTasks, completionRate } = stats;
 
     useEffect(() => {
         setCurrentPage(1);
@@ -222,11 +236,6 @@ export default function TasksPage() {
             setCurrentPage(totalPages);
         }
     }, [currentPage, totalPages]);
-
-    const paginatedTasks = filteredTasks.slice(
-        (currentPage - 1) * TASKS_PER_PAGE,
-        currentPage * TASKS_PER_PAGE
-    );
 
     const getPageNumbers = () => {
         const pages: (number | string)[] = [];
@@ -503,7 +512,7 @@ export default function TasksPage() {
                                     </div>
                                 ))}
                             </div>
-                        ) : filteredTasks.length === 0 ? (
+                        ) : tasks.length === 0 ? (
                             <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-slate-50 px-6 py-16 text-center">
                                 <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-200 text-slate-500">
                                     <FaRegClock className="text-xl" />
@@ -518,7 +527,7 @@ export default function TasksPage() {
                         ) : (
                             <>
                                 <div className="space-y-4">
-                                    {paginatedTasks.map((task) => {
+                                    {tasks.map((task) => {
                                         const isEditing = editingTaskId === task.id;
 
                                         return (
@@ -661,17 +670,17 @@ export default function TasksPage() {
                                     <div className="text-sm text-slate-500">
                                         Showing{" "}
                                         <span className="font-semibold text-slate-800">
-                                            {filteredTasks.length === 0
+                                            {totalMatchingTasks === 0
                                                 ? 0
                                                 : (currentPage - 1) * TASKS_PER_PAGE + 1}
                                         </span>{" "}
                                         to{" "}
                                         <span className="font-semibold text-slate-800">
-                                            {Math.min(currentPage * TASKS_PER_PAGE, filteredTasks.length)}
+                                            {Math.min(currentPage * TASKS_PER_PAGE, totalMatchingTasks)}
                                         </span>{" "}
                                         of{" "}
                                         <span className="font-semibold text-slate-800">
-                                            {filteredTasks.length}
+                                            {totalMatchingTasks}
                                         </span>{" "}
                                         tasks
                                     </div>
